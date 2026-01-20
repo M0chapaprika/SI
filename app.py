@@ -285,16 +285,45 @@ def procesar_operacion():
     cursor = conn.cursor()
 
     try:
+        # --- MODIFICACIÓN 1: Traer fecha de vencimiento ---
+        # Hacemos JOIN con ba.tarjetas_privadas (alias 'tpriv')
         cursor.execute("""
-            SELECT TOP 1 tp.id_tarjeta, tp.saldo 
+            SELECT TOP 1 tp.id_tarjeta, tp.saldo, tpriv.fecha_vencimiento
             FROM ba.tarjetas_publico tp 
             JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta 
+            JOIN ba.tarjetas_privadas tpriv ON tp.id_tarjeta = tpriv.id_tarjeta
             WHERE it.id_cliente = ? AND tp.id_estatus_tarjeta = 2
         """, (current_user.id,))
+        
         mi_data = cursor.fetchone()
         
         if not mi_data: raise Exception("No tienes una tarjeta activa.")
-        mi_id_tarjeta, mi_saldo = mi_data
+        
+        # Desempaquetamos los 3 datos
+        mi_id_tarjeta, mi_saldo, fecha_venc_str = mi_data
+
+        # --- MODIFICACIÓN 2: Validar Expiración ---
+        # El formato en BD es texto "MM/YY" (Ej: "01/20")
+        if fecha_venc_str:
+            try:
+                # Convertimos texto a objeto fecha
+                fecha_venc = datetime.strptime(fecha_venc_str, '%m/%y')
+                now = datetime.now()
+                
+                # Comparamos Año y Mes actual
+                # Si el año de la tarjeta es menor al actual OR
+                # Si es el mismo año pero el mes de la tarjeta es menor al actual
+                if (fecha_venc.year < now.year) or \
+                   (fecha_venc.year == now.year and fecha_venc.month < now.month):
+                    
+                    # ERROR: Se detiene todo aquí
+                    raise Exception(f"Operación rechazada. Tu tarjeta venció en {fecha_venc_str}.")
+            except ValueError:
+                # Si el formato en la BD es inválido, podrías bloquear o dejar pasar. 
+                # Por seguridad, mejor bloqueamos si no entendemos la fecha.
+                print(f"Error formato fecha BD: {fecha_venc_str}")
+        
+        # ----------------------------------------------
 
         conn.autocommit = False # Iniciamos transacción manual
 
@@ -305,14 +334,12 @@ def procesar_operacion():
             # 1. Sumar saldo a mi tarjeta
             cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo + ? WHERE id_tarjeta = ?", (monto, mi_id_tarjeta))
             
-            # 2. Registrar en Transacciones (ESTE SÍ FUNCIONA)
+            # 2. Registrar en Transacciones
             cursor.execute("""
                 INSERT INTO tr.transacciones (id_tipo_transaccion, id_tarjeta_origen, id_tarjeta_destino, monto, fecha_transaccion, descripcion_usuario, id_estatus_transaccion)
                 VALUES (1, ?, ?, ?, GETDATE(), 'Depósito en Ventanilla Virtual', 2)
             """, (mi_id_tarjeta, mi_id_tarjeta, monto))
             
-            # BORRAMOS EL BLOQUE "INSERT INTO ba.movimientos..." PORQUE ESA TABLA ESTÁ ROTA
-
             conn.commit()
             flash(f"Depósito de ${monto} exitoso.")
 
@@ -322,7 +349,7 @@ def procesar_operacion():
         elif tipo_op == 'TRANSFERENCIA':
             cuenta_destino_raw = request.form.get('cuenta_destino')
             descripcion = request.form.get('descripcion') or 'Transferencia SPEI'
-            cvv_input = request.form.get('cvv_confirmacion') # Recibido del input HTML
+            cvv_input = request.form.get('cvv_confirmacion')
 
             # --- Validaciones Básicas ---
             if not cuenta_destino_raw: raise Exception("Falta la cuenta destino.")
@@ -330,30 +357,27 @@ def procesar_operacion():
             if mi_saldo < monto: raise Exception("Saldo insuficiente.")
 
             # --- VALIDACIÓN DE SEGURIDAD (CVV) ---
-            # 1. Buscamos el CVV encriptado de MI tarjeta en la BD
+            # Buscamos el CVV encriptado
             cursor.execute("SELECT cvv_encriptado FROM ba.tarjetas_privadas WHERE id_tarjeta = ?", (mi_id_tarjeta,))
             priv_data = cursor.fetchone()
 
             if not priv_data or not priv_data[0]:
-                raise Exception("Tu tarjeta no tiene un CVV configurado. (Usuarios antiguos deben crear cuenta nueva).")
+                raise Exception("Tu tarjeta no tiene un CVV configurado.")
             
-            # 2. Desencriptamos el CVV real de la BD
+            # Desencriptamos
             try:
                 cvv_real_bd = cipher_suite.decrypt(priv_data[0]).decode('utf-8')
             except:
                 raise Exception("Error de seguridad: No se pudo validar la tarjeta.")
 
-            # 3. Comparamos lo que escribió el usuario vs Base de Datos
             if cvv_input != cvv_real_bd:
                 raise Exception("CVV Incorrecto. Transacción rechazada.")
 
             # --- LIMPIEZA DE CUENTA DESTINO ---
-            # Quita espacios: "4500 1207" -> "45001207"
             cuenta_limpia = cuenta_destino_raw.replace(" ", "")
-            # Toma los últimos 4: "45001207" -> "1207"
             ultimos_4_destino = cuenta_limpia[-4:] 
 
-            # Buscar ID de la tarjeta destino
+            # Buscar tarjeta destino
             cursor.execute("SELECT id_tarjeta FROM ba.tarjetas_publico WHERE ultimos_4 = ?", (ultimos_4_destino,))
             dest_data = cursor.fetchone()
             
@@ -365,12 +389,10 @@ def procesar_operacion():
             if mi_id_tarjeta == dest_id_tarjeta: raise Exception("No puedes transferirte a ti mismo.")
 
             # --- EJECUTAR TRANSFERENCIA ---
-            # 1. Restar a mi cuenta
             cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo - ? WHERE id_tarjeta = ?", (monto, mi_id_tarjeta))
-            # 2. Sumar a la cuenta destino
             cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo + ? WHERE id_tarjeta = ?", (monto, dest_id_tarjeta))
 
-            # 3. Guardar historial
+            # Guardar historial
             cursor.execute("""
                 INSERT INTO tr.transacciones (id_tipo_transaccion, id_tarjeta_origen, id_tarjeta_destino, monto, fecha_transaccion, descripcion_usuario, id_estatus_transaccion)
                 VALUES (3, ?, ?, ?, GETDATE(), ?, 2)
@@ -385,7 +407,7 @@ def procesar_operacion():
 
     except Exception as e:
         conn.rollback()
-        print("Error Operación:", e) # Log para depuración en terminal
+        # print("Error Operación:", e) # Descomenta para ver errores en consola
         flash(f"Error: {str(e)}")
     finally:
         conn.close()
