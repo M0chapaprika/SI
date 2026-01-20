@@ -46,12 +46,16 @@
                             <label>Titular</label>
                             <span>{{ nombre_cliente }}</span>
                         </div>
-                    <div class="detail-group">
-                        <label>Vence</label>
-                        <span id="cardExpiry" data-expiry="**/{{ anio_vencimiento }}">
-                            **/{{ anio_vencimiento }}
-                        </span>
-                    </div>
+                        
+                        <div class="detail-group">
+                            <label>Vence</label>
+                            <span id="cardExpiry">**/{{ anio_vencimiento }}</span>
+                        </div>
+
+                        <div class="detail-group">
+                            <label>CVV</label>
+                            <span id="cardCvv" class="cvv-text">***</span>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -4,11 +4,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const cardNumberDisplay = document.getElementById('cardNumberDisplay');
     const cardExpiryDisplay = document.getElementById('cardExpiry');
     
-    // Verificamos que los elementos existan antes de ejecutar nada
+    // NUEVO: Seleccionamos el elemento del CVV
+    const cardCvvDisplay = document.getElementById('cardCvv'); 
+    
+    // Verificamos que los elementos principales existan
     if (!btnReveal || !cardNumberDisplay || !cardExpiryDisplay) return;
 
     // 2. Guardamos los valores originales "censurados"
-    // Estos vienen de los atributos data-last-four y data-expiry del HTML
     const originalLast4 = cardNumberDisplay.getAttribute('data-last-four') || "0000";
     const originalExpiry = cardExpiryDisplay.getAttribute('data-expiry') || "**/**";
     
@@ -32,16 +34,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                // --- MANEJO DE ERRORES DE SESIÓN (SOLUCIÓN AL "<!DOCTYPE html>") ---
+                // --- MANEJO DE ERRORES DE SESIÓN ---
                 const contentType = response.headers.get("content-type");
                 if (contentType && contentType.includes("text/html")) {
-                    // Si el servidor devuelve HTML en vez de JSON, es porque la sesión expiró
-                    // y te redirigió al Login.
                     alert("Tu sesión ha expirado. Vamos a recargar para que inicies sesión.");
                     window.location.reload(); 
                     return;
                 }
-                // ------------------------------------------------------------------
 
                 // Si no es HTML, intentamos leer el JSON
                 const data = await response.json();
@@ -50,7 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     // ÉXITO: Mostramos los datos reales
                     
                     // 1. Formatear Tarjeta (grupos de 4)
-                    // Si viene vacía, ponemos ceros
                     const rawNum = data.numero || "0000000000000000"; 
                     const formattedNumber = rawNum.match(/.{1,4}/g).join(' ');
                     cardNumberDisplay.innerText = formattedNumber;
@@ -58,13 +56,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 2. Formatear Vencimiento
                     cardExpiryDisplay.innerText = data.vencimiento;
 
-                    // 3. Actualizar estado y botón
+                    // 3. NUEVO: Mostrar CVV
+                    if (cardCvvDisplay) {
+                        cardCvvDisplay.innerText = data.cvv;
+                    }
+
+                    // 4. Actualizar estado y botón
                     isRevealed = true;
                     btnReveal.innerHTML = '<i class="fas fa-eye-slash"></i> Ocultar Datos';
                     btnReveal.style.color = '#c0392b'; // Rojo de advertencia
                     
                 } else {
-                    // ERROR CONTROLADO (ej: no hay tarjeta asociada)
                     throw new Error(data.error || 'Error desconocido del servidor');
                 }
 
@@ -89,11 +91,16 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 2. Restaurar la fecha oculta
             cardExpiryDisplay.innerText = originalExpiry;
+
+            // 3. NUEVO: Ocultar CVV nuevamente
+            if (cardCvvDisplay) {
+                cardCvvDisplay.innerText = "***";
+            }
             
-            // 3. Resetear el botón
+            // 4. Resetear el botón
             isRevealed = false;
             btnReveal.innerHTML = '<i class="fas fa-eye"></i> Mostrar Datos';
-            btnReveal.style.color = ''; // Volver al color original (CSS)
+            btnReveal.style.color = ''; // Volver al color original
         }
     });
 });

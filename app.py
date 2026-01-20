@@ -142,45 +142,97 @@ def logout():
 @app.route('/mi-banco')
 @login_required
 def user_dashboard():
+    # Si es admin, redirigir
     if current_user.es_admin(): return redirect(url_for('admin_dashboard'))
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener tarjeta y saldo
-    cursor.execute("""
-        SELECT TOP 1 tp.saldo, tp.ultimos_4, tp.id_tarjeta
+    # 1. CONSULTA PRINCIPAL
+    # CORRECCIÓN: Cambiamos 'b.nombre_banco' por 'b.nombre'
+    query = """
+        SELECT TOP 1 
+            tp.saldo, 
+            tp.ultimos_4, 
+            tp.id_tarjeta,
+            b.nombre,  -- <--- AQUÍ ESTABA EL ERROR (antes decía nombre_banco)
+            cp.nombre, 
+            cp.apellido_paterno
         FROM ba.tarjetas_publico tp
         JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+        JOIN ba.bancos b ON tp.id_banco = b.id_banco
+        JOIN usr.clientes_publico cp ON it.id_cliente = cp.id_cliente
         WHERE it.id_cliente = ? AND tp.id_estatus_tarjeta = 2
-    """, (current_user.id,))
-    data = cursor.fetchone()
+    """
     
+    try:
+        cursor.execute(query, (current_user.id,))
+        data = cursor.fetchone()
+    except Exception as e:
+        print("Error SQL:", e)
+        # Si falla por nombre de columna, intentamos un fallback rápido para que no rompa
+        data = None
+
+    # Valores por defecto
     saldo = 0
-    tarjeta = "----"
+    ultimos_4 = "----"
+    banco_nombre = "Banco Seguro"
+    nombre_pila = current_user.nombre 
+    nombre_completo = "USUARIO SIN TARJETA"
     movimientos = []
     
     if data:
         saldo = data[0]
-        tarjeta = data[1]
+        ultimos_4 = data[1]
         id_tarjeta = data[2]
+        banco_nombre = data[3] # Ahora tomará el valor de b.nombre
+        nombre_pila = data[4]
+        apellido = data[5]
         
-        # Obtener últimos 5 movimientos
+        nombre_completo = f"{nombre_pila} {apellido}".upper()
+        
+        # 2. CONSULTA SECUNDARIA: Movimientos
         cursor.execute("""
-            SELECT 
-                tipo_movimiento, 
+            SELECT TOP 5
+                id_tipo_transaccion, 
                 monto, 
-                descripcion, 
-                fecha_movimiento 
-            FROM ba.movimientos 
+                descripcion_usuario, 
+                fecha_transaccion,
+                id_tarjeta_origen,
+                id_tarjeta_destino
+            FROM tr.transacciones 
             WHERE id_tarjeta_origen = ? OR id_tarjeta_destino = ?
-            ORDER BY fecha_movimiento DESC
+            ORDER BY fecha_transaccion DESC
         """, (id_tarjeta, id_tarjeta))
-        movimientos = cursor.fetchall()
+        
+        raw_movs = cursor.fetchall()
+        
+        for m in raw_movs:
+            es_ingreso = (m[5] == id_tarjeta)
+            tipo_txt = "Movimiento"
+            if m[0] == 1: tipo_txt = "Depósito"
+            elif m[0] == 2: tipo_txt = "Retiro"
+            elif m[0] == 3: tipo_txt = "Transferencia"
+            
+            movimientos.append({
+                'tipo': tipo_txt,
+                'monto': float(m[1]),
+                'descripcion': m[2],
+                'fecha': m[3].strftime('%d/%m/%Y'),
+                'es_ingreso': es_ingreso
+            })
 
     conn.close()
-    return render_template('dashboard_tarjeta.html', nombre=current_user.nombre, saldo=saldo, tarjeta=tarjeta, movimientos=movimientos)
-
+    
+    return render_template('dashboard_tarjeta.html', 
+                           nombre_usuario=nombre_pila,
+                           nombre_cliente=nombre_completo,
+                           banco_nombre=banco_nombre,
+                           saldo="{:,.2f}".format(saldo),
+                           ultimos_4=ultimos_4,
+                           anio_vencimiento="30",
+                           movimientos=movimientos)
+    
 # --- 1. RUTA PARA VER LA PANTALLA (GET) ---
 @app.route('/operaciones', methods=['GET'])
 @login_required

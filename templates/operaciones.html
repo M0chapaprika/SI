@@ -37,12 +37,17 @@
 
                 <div id="camposTransferencia" style="display: none;">
                     <div class="form-group">
-                        <label>Cuenta Destino (10 dígitos)</label>
+                        <label>Cuenta Destino (10 dígitos o Tarjeta)</label>
                         <input type="text" name="cuenta_destino" class="form-control" placeholder="Ej: 1234567890">
                     </div>
                     <div class="form-group">
                         <label>Concepto / Descripción</label>
                         <input type="text" name="descripcion" class="form-control" placeholder="Pago de cena">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Confirmar con CVV</label>
+                        <input type="password" name="cvv_confirmacion" id="cvvInput" class="form-control" placeholder="Ej: 123" maxlength="3">
                     </div>
                 </div>
 
@@ -57,10 +62,17 @@
             const camposTrans = document.getElementById('camposTransferencia');
             const btn = document.getElementById('btnSubmit');
             const tabs = document.querySelectorAll('.tab-btn');
+            
+            // Referencia al campo CVV para activar/desactivar el 'required'
+            const cvvInput = document.getElementById('cvvInput');
 
             if (tab === 'deposito') {
                 tipoInput.value = 'DEPOSITO';
                 camposTrans.style.display = 'none';
+                
+                // Desactivamos validación del CVV en depósitos
+                cvvInput.removeAttribute('required');
+
                 btn.textContent = 'Realizar Depósito';
                 btn.style.backgroundColor = '#27ae60'; // Verde
                 tabs[0].classList.add('active');
@@ -68,6 +80,10 @@
             } else {
                 tipoInput.value = 'TRANSFERENCIA';
                 camposTrans.style.display = 'block';
+                
+                // Activamos validación del CVV en transferencias
+                cvvInput.setAttribute('required', '');
+
                 btn.textContent = 'Enviar Transferencia';
                 btn.style.backgroundColor = '#820ad1'; // Morado
                 tabs[0].classList.remove('active');
