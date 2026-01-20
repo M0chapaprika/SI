@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro - Banco Seguro</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+        }
+        .register-box {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        h2 { color: #1a1a2e; text-align: center; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; color: #666; margin-bottom: 5px; font-size: 0.9rem; }
+        .form-control {
+            width: 100%; padding: 10px; border: 1px solid #ddd;
+            border-radius: 5px; box-sizing: border-box;
+        }
+        /* Estilo extra para el select para que se vea igual a los inputs */
+        select.form-control {
+            background-color: white;
+            height: 40px; /* Asegura altura consistente */
+        }
+        .btn-primary {
+            width: 100%; padding: 12px; background: #e94560; color: white;
+            border: none; border-radius: 5px; font-weight: bold; cursor: pointer;
+            font-size: 1rem; margin-top: 10px;
+        }
+        .btn-primary:hover { background: #d63d56; }
+        .link-login { text-align: center; margin-top: 15px; font-size: 0.9rem; }
+        .link-login a { color: #1a1a2e; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="register-box">
+        <h2><i class="fas fa-user-plus"></i> Crear Cuenta</h2>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div style="background:#ffebee; color:#c62828; padding:10px; border-radius:5px; margin-bottom:15px;">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form action="{{ url_for('registro') }}" method="POST">
+            <div class="form-group">
+                <label>Nombre(s)</label>
+                <input type="text" name="nombre" class="form-control" required>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Apellido Paterno</label>
+                    <input type="text" name="paterno" class="form-control" required>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Apellido Materno</label>
+                    <input type="text" name="materno" class="form-control">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Fecha de Nacimiento</label>
+                <input type="date" name="nacimiento" class="form-control" required>
+            </div>
+
+            <div class="form-group">
+                <label>Nacionalidad (País de Residencia)</label>
+                <select name="id_pais" class="form-control" required>
+                    <option value="" disabled selected>Seleccione su país...</option>
+                    <option value="1">México (MXN)</option>
+                    <option value="2">Estados Unidos (USD)</option>
+                    <option value="3">Colombia (COP)</option>
+                    <option value="4">España (EUR)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>RFC</label>
+                <input type="text" name="rfc" class="form-control" required placeholder="ABCD123456XYZ">
+            </div>
+            <div class="form-group">
+                <label>Teléfono</label>
+                <input type="tel" name="telefono" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label>Correo Electrónico</label>
+                <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label>Contraseña</label>
+                <input type="password" name="password" class="form-control" required placeholder="********">
+            </div>
+
+            <button type="submit" class="btn-primary">Registrarme</button>
+        </form>
+
+        <div class="link-login">
+            ¿Ya tienes cuenta? <a href="{{ url_for('login') }}">Inicia Sesión aquí</a>
+        </div>
+    </div>
+</body>
+</html>

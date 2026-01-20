@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Editar Usuario</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .form-container { background: white; padding: 30px; border-radius: 10px; max-width: 600px; margin: 0 auto; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+        .form-control { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        .btn-submit { background-color: #3498db; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; width: 100%; font-size: 1rem; }
+        .readonly { background-color: #f0f0f0; color: #777; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">Admin Panel - Edición</div>
+    </nav>
+
+    <div class="container">
+        <div class="form-container">
+            <h2 style="margin-bottom: 20px; text-align: center;">Editar Cliente #{{ id_cliente }}</h2>
+            
+            <form action="{{ url_for('admin_editar', id_cliente=id_cliente) }}" method="POST">
+                
+                <div class="form-group">
+                    <label>Nombre del Cliente</label>
+                    <input type="text" class="form-control readonly" value="{{ cliente.nombre }} {{ cliente.apellido_paterno }}" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label>Rol de Usuario</label>
+                    <select name="rol" class="form-control">
+                        {% for r in cat_roles %}
+                            <option value="{{ r.id_rol }}" {{ 'selected' if r.id_rol == cliente.id_rol else '' }}>
+                                {{ r.nombre }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+                <div class="form-group">
+                    <label>Estatus de Acceso (Login)</label>
+                    <select name="estatus_cliente" class="form-control">
+                        {% for e in cat_estatus %}
+                            <option value="{{ e.id_estatus }}" {{ 'selected' if e.id_estatus == cliente.id_estatus else '' }}>
+                                {{ e.nombre }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <small style="color: #666;">Si suspendes aquí, el usuario no podrá entrar a la web.</small>
+                </div>
+
+                <div class="form-group">
+                    <label><i class="fas fa-credit-card"></i> Estatus de Tarjeta Bancaria</label>
+                    <select name="estatus_tarjeta" class="form-control" style="border-color: #3498db;">
+                        {% if tarjeta %}
+                            {% for et in cat_estatus_tarjeta %}
+                                <option value="{{ et.id_estado }}" {{ 'selected' if et.id_estado == tarjeta.id_estatus_tarjeta else '' }}>
+                                    {{ et.nombre }}
+                                </option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="">Cliente sin tarjeta asignada</option>
+                        {% endif %}
+                    </select>
+                    <small style="color: #666;">Controla si la tarjeta pasa o es rechazada en transacciones.</small>
+                </div>
+
+                <button type="submit" class="btn-submit">Guardar Cambios</button>
+                <a href="{{ url_for('admin_usuarios') }}" style="display: block; text-align: center; margin-top: 15px; color: #666;">Cancelar</a>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

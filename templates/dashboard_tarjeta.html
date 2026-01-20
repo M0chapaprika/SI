@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Banco - Mis Tarjetas</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="logo">
+            <i class="fas fa-university"></i> Banco Seguro
+        </div>
+        <div class="user-menu">
+            <span><i class="fas fa-user-circle"></i> Hola, {{ nombre_usuario }}</span>
+            <a href="/logout" class="btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Salir
+            </a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <h1><i class="fas fa-wallet"></i> Mi Tarjeta Digital</h1>
+
+        <div class="card-container">
+            
+            <div class="credit-card" id="myCreditCard">
+                <div class="card-front">
+                    <div class="card-top">
+                        <span class="chip"></span>
+                        <span class="bank-name">{{ banco_nombre }}</span>
+                    </div>
+                    
+                    <div class="card-number-container">
+                        <p class="card-number" id="cardNumberDisplay" data-last-four="{{ ultimos_4 }}">
+                            <span>****</span> <span>****</span> <span>****</span> {{ ultimos_4 }}
+                        </p>
+                    </div>
+
+                    <div class="card-details">
+                        <div class="detail-group">
+                            <label>Titular</label>
+                            <span>{{ nombre_cliente }}</span>
+                        </div>
+                    <div class="detail-group">
+                        <label>Vence</label>
+                        <span id="cardExpiry" data-expiry="**/{{ anio_vencimiento }}">
+                            **/{{ anio_vencimiento }}
+                        </span>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-controls">
+                <div class="balance-box">
+                    <p>Saldo Disponible</p>
+                    <h2>${{ saldo }}</h2>
+                </div>
+                
+                <button class="btn-reveal" id="btnReveal">
+                    <i class="fas fa-eye"></i> Mostrar Datos
+                </button>
+            </div>
+        </div>
+        
+        <div class="actions-grid">
+            <a href="{{ url_for('ver_operaciones') }}" class="action-card">
+                <div class="icon-box"><i class="fas fa-exchange-alt"></i></div>
+                <span>Depositar / Transferir</span>
+            </a>
+
+            <a href="{{ url_for('ver_movimientos') }}" class="action-card">
+                <div class="icon-box"><i class="fas fa-history"></i></div>
+                <span>Movimientos</span>
+            </a>
+
+        <p style="margin-top: 2rem; color: #666; font-size: 0.8rem; text-align: center;">
+            <i class="fas fa-shield-alt"></i> Tus datos viajan encriptados de extremo a extremo.
+        </p>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+</body>
+</html>

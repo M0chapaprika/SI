@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Nuevo Usuario</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .form-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+        .form-control { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        .section-title { grid-column: 1 / -1; margin-top: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #1a1a2e; }
+        .btn-submit {
+            background-color: #1a1a2e;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 20px;
+        }
+        .btn-cancel { background-color: #ccc; color: #333; text-decoration: none; padding: 12px 25px; border-radius: 5px; margin-left: 10px;}
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">Admin Panel</div>
+    </nav>
+
+    <div class="container">
+        <h1>Registrar Nuevo Cliente</h1>
+        
+        <form action="{{ url_for('admin_crear') }}" method="POST" class="form-container">
+            <div class="form-grid">
+                
+                <h3 class="section-title">Datos Personales</h3>
+                <div class="form-group">
+                    <label>Nombre</label>
+                    <input type="text" name="nombre" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Apellido Paterno</label>
+                    <input type="text" name="paterno" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Apellido Materno</label>
+                    <input type="text" name="materno" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Fecha Nacimiento</label>
+                    <input type="date" name="nacimiento" class="form-control" required>
+                </div>
+
+                <h3 class="section-title">Datos de Contacto (Privado)</h3>
+                <div class="form-group">
+                    <label>Email (Será el usuario)</label>
+                    <input type="email" name="email" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" name="telefono" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>RFC</label>
+                    <input type="text" name="rfc" class="form-control" required>
+                </div>
+
+                <h3 class="section-title">Seguridad</h3>
+                <div class="form-group">
+                    <label>Contraseña Acceso</label>
+                    <input type="password" name="password" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Rol</label>
+                    <select name="rol" class="form-control">
+                        <option value="1">Cliente / Usuario</option>
+                        <option value="2">Administrador</option>
+                    </select>
+                </div>
+
+                <h3 class="section-title">Datos Bancarios Iniciales</h3>
+                <div class="form-group">
+                    <label>Saldo Inicial ($)</label>
+                    <input type="number" name="saldo" class="form-control" value="0">
+                </div>
+            </div>
+
+            <button type="submit" class="btn-submit">Guardar Cliente</button>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn-cancel">Cancelar</a>
+        </form>
+    </div>
+</body>
+</html>

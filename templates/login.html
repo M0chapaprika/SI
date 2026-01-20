@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso Banco Seguro</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* Estilos especificos para login */
+        .login-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+        .login-box {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 15px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .login-box h2 { color: #1a1a2e; margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1.5rem; text-align: left; }
+        .form-group label { display: block; color: #666; margin-bottom: 5px; font-size: 0.9rem; }
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box; 
+        }
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            background: #e94560;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .btn-primary:hover { background: #d63d56; }
+        .alert {
+            padding: 10px;
+            background-color: #ffebee;
+            color: #c62828;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="login-box">
+            <div style="font-size: 3rem; color: #1a1a2e; margin-bottom: 10px;">
+                <i class="fas fa-university"></i>
+            </div>
+            <h2>Bienvenido</h2>
+
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form action="{{ url_for('login') }}" method="POST">
+                <div class="form-group">
+                    <label>Correo Electronico</label>
+                    <input type="email" name="email" class="form-control" required placeholder="ejemplo@banco.com">
+                </div>
+                <div class="form-group">
+                    <label>Contrasena</label>
+                    <input type="password" name="password" class="form-control" required placeholder="********">
+                </div>
+                
+                <button type="submit" class="btn-primary">Iniciar Sesion</button>
+                
+                <div style="margin: 20px 0; border-top: 1px solid #eee; position: relative;">
+                    <span style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: white; padding: 0 10px; color: #999; font-size: 0.8rem;">O</span>
+                </div>
+
+                <a href="{{ url_for('registro') }}" class="btn-secondary" style="display: block; text-decoration: none; background: #fff; border: 2px solid #1a1a2e; color: #1a1a2e; padding: 10px; border-radius: 5px; font-weight: bold; transition: all 0.3s;">
+                    Crear Cuenta Nueva
+                </a>
+            </form>
+            
+            <p style="margin-top: 20px; font-size: 0.8rem; color: #888;">
+                Sistema Bancario Seguro &copy; 2024
+            </p>
+        </div>
+    </div>
+</body>
+</html>

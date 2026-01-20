@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Movimientos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">Historial</div>
+        <a href="{{ url_for('user_dashboard') }}" class="btn-back"><i class="fas fa-arrow-left"></i> Volver</a>
+    </nav>
+
+    <div class="container">
+        <h1>Últimos Movimientos</h1>
+
+        <div class="movimientos-list">
+            {% if movimientos %}
+                {% for mov in movimientos %}
+                <div class="mov-card">
+                    <div class="mov-icon {{ 'icon-in' if mov.es_ingreso else 'icon-out' }}">
+                        <i class="fas {{ 'fa-arrow-down' if mov.es_ingreso else 'fa-arrow-up' }}"></i>
+                    </div>
+                    <div class="mov-info">
+                        <h3>{{ mov.tipo }}</h3>
+                        <p>{{ mov.descripcion }}</p>
+                        <small>{{ mov.fecha }}</small>
+                    </div>
+                    <div class="mov-amount {{ 'text-green' if mov.es_ingreso else 'text-red' }}">
+                        {{ '+' if mov.es_ingreso else '-' }} ${{ "{:,.2f}".format(mov.monto) }}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p style="text-align: center; color: #777;">No hay movimientos registrados.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

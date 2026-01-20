@@ -1,0 +1,768 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+import pyodbc
+from werkzeug.security import generate_password_hash, check_password_hash
+from cryptography.fernet import Fernet
+import random
+from datetime import datetime
+
+app = Flask(__name__)
+app.secret_key = 'tu_clave_super_secreta_aqui'  # Cambia esto en producción
+
+# --- CONFIGURACIÓN DE CRIPTOGRAFÍA ---
+# he generado esta clave válida para ti. 
+# IMPORTANTE: Si reinicias la base de datos, usa siempre la misma clave, 
+# o no podrás desencriptar las tarjetas guardadas anteriormente.
+key = b'2r5U8x/A?D(G+KbPeShVmYq3t6w9z$C&' # Esta era incorrecta en el formato, usaré una generada por librería abajo:
+# CLAVE CORREGIDA Y VÁLIDA:
+key = b'6_bWJ7x8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q=' 
+cipher_suite = Fernet(key)
+
+# --- CONFIGURACIÓN BASE DE DATOS ---
+def get_db_connection():
+    conn = pyodbc.connect(
+        'DRIVER={ODBC Driver 17 for SQL Server};'
+        r'SERVER=IANDAVID\SQLSERVER;'   # <--- Nombre exacto de tu imagen
+        'DATABASE=banco;'               # <--- Nombre corregido de la BD
+        'Trusted_Connection=yes;'
+        'TrustServerCertificate=yes;'   # <--- Importante por la configuración de tu imagen
+    )
+    return conn
+
+# --- CONFIGURACIÓN FLASK-LOGIN ---
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+class User(UserMixin):
+    def __init__(self, id_cliente, nombre, rol, estatus):
+        self.id = id_cliente # Flask-Login usa 'id' como identificador
+        self.nombre = nombre
+        self.rol = rol # 1=Usuario, 2=Admin
+        self.estatus = estatus
+
+    def es_admin(self):
+        return self.rol == 2
+
+@login_manager.user_loader
+def load_user(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Buscamos al usuario por ID para recargar la sesión
+    cursor.execute("""
+        SELECT cp.id_cliente, cp.nombre, cp.id_rol, e.nombre 
+        FROM usr.clientes_publico cp
+        JOIN gral.estatus e ON cp.id_estatus = e.id_estatus
+        WHERE cp.id_cliente = ?
+    """, (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return User(id_cliente=row[0], nombre=row[1], rol=row[2], estatus=row[3])
+    return None
+
+def limpiar_texto(texto):
+    return texto.strip().upper() if texto else ""
+
+# =======================================================
+# RUTAS DE AUTENTICACIÓN
+# =======================================================
+
+@app.route('/')
+def index():
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        if current_user.es_admin(): return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('user_dashboard'))
+
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. Buscar el hash de la contraseña y el ID del cliente
+        cursor.execute("""
+            SELECT u.contrasena, cp.id_cliente, cp.nombre, cp.id_rol, e.nombre
+            FROM usr.usuarios u
+            JOIN usr.clientes_privado cpr ON u.id_cliente = cpr.id_cliente
+            JOIN usr.clientes_publico cp ON u.id_cliente = cp.id_cliente
+            JOIN gral.estatus e ON cp.id_estatus = e.id_estatus
+            WHERE cpr.correo_electronico = ?
+        """, (email,))
+        
+        user_data = cursor.fetchone()
+        conn.close()
+        
+        if user_data:
+            stored_hash = user_data[0] # Viene como bytes de la BD si es varbinary, o string
+            
+            # Asegurarse de que el hash esté en formato correcto para comparar
+            if isinstance(stored_hash, bytes):
+                stored_hash = stored_hash.decode('utf-8')
+
+            if check_password_hash(stored_hash, password):
+                # Verificar si está activo
+                if user_data[4] != 'ACTIVO':
+                    flash("Tu cuenta está suspendida. Contacta al banco.")
+                    return redirect(url_for('login'))
+
+                # Crear objeto usuario y loguear
+                user_obj = User(id_cliente=user_data[1], nombre=user_data[2], rol=user_data[3], estatus=user_data[4])
+                login_user(user_obj)
+                
+                # Redirección según rol
+                if user_obj.es_admin():
+                    return redirect(url_for('admin_dashboard'))
+                else:
+                    return redirect(url_for('user_dashboard'))
+            else:
+                flash("Contraseña incorrecta")
+        else:
+            flash("Usuario no encontrado")
+            
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash("Has cerrado sesión.")
+    return redirect(url_for('login'))
+
+# =======================================================
+# RUTAS DE CLIENTE (USUARIO NORMAL)
+# =======================================================
+
+@app.route('/mi-banco')
+@login_required
+def user_dashboard():
+    if current_user.es_admin(): return redirect(url_for('admin_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Obtener tarjeta y saldo
+    cursor.execute("""
+        SELECT TOP 1 tp.saldo, tp.ultimos_4, tp.id_tarjeta
+        FROM ba.tarjetas_publico tp
+        JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+        WHERE it.id_cliente = ? AND tp.id_estatus_tarjeta = 2
+    """, (current_user.id,))
+    data = cursor.fetchone()
+    
+    saldo = 0
+    tarjeta = "----"
+    movimientos = []
+    
+    if data:
+        saldo = data[0]
+        tarjeta = data[1]
+        id_tarjeta = data[2]
+        
+        # Obtener últimos 5 movimientos
+        cursor.execute("""
+            SELECT 
+                tipo_movimiento, 
+                monto, 
+                descripcion, 
+                fecha_movimiento 
+            FROM ba.movimientos 
+            WHERE id_tarjeta_origen = ? OR id_tarjeta_destino = ?
+            ORDER BY fecha_movimiento DESC
+        """, (id_tarjeta, id_tarjeta))
+        movimientos = cursor.fetchall()
+
+    conn.close()
+    return render_template('dashboard_tarjeta.html', nombre=current_user.nombre, saldo=saldo, tarjeta=tarjeta, movimientos=movimientos)
+
+# --- 1. RUTA PARA VER LA PANTALLA (GET) ---
+@app.route('/operaciones', methods=['GET'])
+@login_required
+def ver_operaciones():
+    # CORRECCIÓN: Usamos 'current_user.nombre' porque así lo definiste en tu clase User
+    return render_template('operaciones.html', nombre_usuario=current_user.nombre)
+
+# --- 2. RUTA PARA PROCESAR LOS DATOS (POST) ---
+# (Borra la función 'def transferir' que tenías antes, usa solo esta)
+@app.route('/procesar_operacion', methods=['POST'])
+@login_required
+def procesar_operacion():
+    # 1. Recibir datos comunes del formulario
+    tipo_op = request.form.get('tipo_operacion') # "DEPOSITO" o "TRANSFERENCIA"
+    monto_str = request.form.get('monto')
+    
+    try:
+        monto = float(monto_str)
+        if monto <= 0: raise Exception("El monto debe ser positivo.")
+    except:
+        flash("Monto inválido.")
+        return redirect(url_for('ver_operaciones')) 
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 2. Obtener MI tarjeta (Origen) y mi Saldo
+        cursor.execute("""
+            SELECT TOP 1 tp.id_tarjeta, tp.saldo 
+            FROM ba.tarjetas_publico tp 
+            JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta 
+            WHERE it.id_cliente = ? AND tp.id_estatus_tarjeta = 2
+        """, (current_user.id,))
+        mi_data = cursor.fetchone()
+        
+        if not mi_data: raise Exception("No tienes una tarjeta activa.")
+        mi_id_tarjeta, mi_saldo = mi_data
+
+        conn.autocommit = False # Iniciamos transacción manual
+
+        # ==========================================
+        # CASO A: DEPÓSITO (Dinero entra)
+        # ==========================================
+        if tipo_op == 'DEPOSITO':
+            # Sumar saldo a mi tarjeta
+            cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo + ? WHERE id_tarjeta = ?", (monto, mi_id_tarjeta))
+            
+            # Registrar historial
+            cursor.execute("""
+                INSERT INTO tr.transacciones (id_tipo_transaccion, id_tarjeta_origen, id_tarjeta_destino, monto, fecha_transaccion, descripcion_usuario, id_estatus_transaccion)
+                VALUES (1, ?, ?, ?, GETDATE(), 'Depósito en Ventanilla Virtual', 2)
+            """, (mi_id_tarjeta, mi_id_tarjeta, monto))
+            
+            flash(f"Depósito de ${monto} exitoso.")
+
+        # ==========================================
+        # CASO B: TRANSFERENCIA (Dinero sale)
+        # ==========================================
+        elif tipo_op == 'TRANSFERENCIA':
+            cuenta_destino_raw = request.form.get('cuenta_destino')
+            descripcion = request.form.get('descripcion') or 'Transferencia SPEI'
+            cvv_input = request.form.get('cvv_confirmacion') # Recibido del input HTML
+
+            # --- Validaciones Básicas ---
+            if not cuenta_destino_raw: raise Exception("Falta la cuenta destino.")
+            if not cvv_input: raise Exception("Debes ingresar tu CVV para autorizar.")
+            if mi_saldo < monto: raise Exception("Saldo insuficiente.")
+
+            # --- VALIDACIÓN DE SEGURIDAD (CVV) ---
+            # 1. Buscamos el CVV encriptado de MI tarjeta en la BD
+            cursor.execute("SELECT cvv_encriptado FROM ba.tarjetas_privadas WHERE id_tarjeta = ?", (mi_id_tarjeta,))
+            priv_data = cursor.fetchone()
+
+            if not priv_data or not priv_data[0]:
+                raise Exception("Tu tarjeta no tiene un CVV configurado. (Usuarios antiguos deben crear cuenta nueva).")
+            
+            # 2. Desencriptamos el CVV real de la BD
+            try:
+                cvv_real_bd = cipher_suite.decrypt(priv_data[0]).decode('utf-8')
+            except:
+                raise Exception("Error de seguridad: No se pudo validar la tarjeta.")
+
+            # 3. Comparamos lo que escribió el usuario vs Base de Datos
+            if cvv_input != cvv_real_bd:
+                raise Exception("CVV Incorrecto. Transacción rechazada.")
+
+            # --- LIMPIEZA DE CUENTA DESTINO ---
+            # Quita espacios: "4500 1207" -> "45001207"
+            cuenta_limpia = cuenta_destino_raw.replace(" ", "")
+            # Toma los últimos 4: "45001207" -> "1207"
+            ultimos_4_destino = cuenta_limpia[-4:] 
+
+            # Buscar ID de la tarjeta destino
+            cursor.execute("SELECT id_tarjeta FROM ba.tarjetas_publico WHERE ultimos_4 = ?", (ultimos_4_destino,))
+            dest_data = cursor.fetchone()
+            
+            if not dest_data: 
+                raise Exception(f"No se encontró ninguna cuenta terminada en {ultimos_4_destino}.")
+            
+            dest_id_tarjeta = dest_data[0]
+
+            if mi_id_tarjeta == dest_id_tarjeta: raise Exception("No puedes transferirte a ti mismo.")
+
+            # --- EJECUTAR TRANSFERENCIA ---
+            # 1. Restar a mi cuenta
+            cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo - ? WHERE id_tarjeta = ?", (monto, mi_id_tarjeta))
+            # 2. Sumar a la cuenta destino
+            cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo + ? WHERE id_tarjeta = ?", (monto, dest_id_tarjeta))
+
+            # 3. Guardar historial
+            cursor.execute("""
+                INSERT INTO tr.transacciones (id_tipo_transaccion, id_tarjeta_origen, id_tarjeta_destino, monto, fecha_transaccion, descripcion_usuario, id_estatus_transaccion)
+                VALUES (3, ?, ?, ?, GETDATE(), ?, 2)
+            """, (mi_id_tarjeta, dest_id_tarjeta, monto, descripcion))
+
+            flash(f"Transferencia de ${monto} enviada a tarjeta ...{ultimos_4_destino}")
+
+        else:
+            raise Exception("Operación no válida.")
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        print("Error Operación:", e) # Log para depuración en terminal
+        flash(f"Error: {str(e)}")
+    finally:
+        conn.close()
+
+    return redirect(url_for('ver_operaciones'))
+
+# =======================================================
+# RUTAS DE ADMINISTRADOR
+# =======================================================
+
+@app.route('/admin/dashboard')
+@login_required
+def admin_dashboard():
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Estadísticas simples
+    cursor.execute("SELECT COUNT(*) FROM usr.clientes_publico WHERE id_estatus = 1")
+    total_clientes = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM ba.tarjetas_publico WHERE id_estatus_tarjeta = 2")
+    total_tarjetas = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT SUM(saldo) FROM ba.tarjetas_publico")
+    total_dinero = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    
+    return render_template('dashboard_admin.html', 
+                           nombre_usuario=current_user.nombre,
+                           total_clientes=total_clientes,
+                           total_tarjetas=total_tarjetas,
+                           total_dinero="{:,.2f}".format(total_dinero))
+
+@app.route('/admin/usuarios')
+@login_required
+def admin_usuarios():
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    sql = """
+        SELECT cp.id_cliente, cp.nombre, cp.apellido_paterno, 
+               r.nombre as rol, e.nombre as estatus
+        FROM usr.clientes_publico cp
+        JOIN usr.roles r ON cp.id_rol = r.id_rol
+        JOIN gral.estatus e ON cp.id_estatus = e.id_estatus
+        ORDER BY cp.id_cliente DESC
+    """
+    cursor.execute(sql)
+    usuarios = cursor.fetchall()
+    conn.close()
+    
+    return render_template('lista_usuarios.html', usuarios=usuarios)
+
+@app.route('/admin/crear', methods=['POST', 'GET'])
+@login_required
+def admin_crear():
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+
+    if request.method == 'POST':
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            nombre = limpiar_texto(request.form['nombre'])
+            paterno = limpiar_texto(request.form['paterno'])
+            materno = limpiar_texto(request.form['materno'])
+            rfc = limpiar_texto(request.form['rfc'])
+            email = request.form['email'].strip().lower()
+            telefono = request.form['telefono']
+            password = request.form['password']
+            rol = int(request.form['rol'])
+            saldo_inicial = float(request.form['saldo'])
+            nacimiento = request.form['nacimiento']
+            
+            cursor.execute("SELECT TOP 1 1 FROM usr.clientes_privado WHERE correo_electronico = ?", (email,))
+            if cursor.fetchone(): raise Exception("Correo duplicado")
+
+            conn.autocommit = False
+
+            cursor.execute("""
+                INSERT INTO usr.clientes_publico (id_pais, id_rol, nombre, apellido_paterno, apellido_materno, fecha_nacimiento, id_estatus) 
+                VALUES (1, ?, ?, ?, ?, ?, 1); 
+                SELECT SCOPE_IDENTITY();
+            """, (rol, nombre, paterno, materno, nacimiento))
+            new_id = int(cursor.fetchone()[0])
+
+            cursor.execute("INSERT INTO usr.clientes_privado (id_cliente, telefono, correo_electronico, rfc) VALUES (?, ?, ?, ?)", 
+                           (new_id, telefono, email, rfc))
+
+            pw_hash = generate_password_hash(password)
+            cursor.execute("INSERT INTO usr.usuarios (id_cliente, contrasena) VALUES (?, ?)", (new_id, pw_hash.encode('utf-8')))
+
+            ultimos_4 = str(random.randint(1000, 9999))
+            cursor.execute("""
+                INSERT INTO ba.tarjetas_publico (id_banco, id_tipo_tarjeta, id_marca, id_red, id_tipo_cuenta, id_categoria, saldo, ultimos_4, id_estatus_tarjeta)
+                VALUES (1, 1, 1, 1, 1, 1, ?, ?, 2); 
+                SELECT SCOPE_IDENTITY();
+            """, (saldo_inicial, ultimos_4))
+            id_tarjeta = int(cursor.fetchone()[0])
+
+            cursor.execute("INSERT INTO ba.identificador_tarjeta (id_tarjeta, id_cliente, numero_cuenta, clabe) VALUES (?, ?, 'GEN', 'GEN')", (id_tarjeta, new_id))
+            
+            pan_enc = cipher_suite.encrypt(f"450000000000{ultimos_4}".encode('utf-8'))
+            cursor.execute("INSERT INTO ba.tarjetas_privadas (id_tarjeta, token_pasarela, numero_tarjeta_encriptado, fecha_vencimiento) VALUES (?, 'TK', ?, '12/30')", (id_tarjeta, pan_enc))
+
+            conn.commit()
+            flash("Usuario creado correctamente.")
+            return redirect(url_for('admin_usuarios'))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error al crear: {e}")
+            return redirect(url_for('admin_crear'))
+        finally:
+            conn.close()
+
+    return render_template('crear_usuario.html')
+
+@app.route('/admin/editar/<int:id_cliente>', methods=['GET', 'POST'])
+@login_required
+def admin_editar(id_cliente):
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    if request.method == 'POST':
+        try:
+            nuevo_estatus = request.form['estatus_cliente'] 
+            nuevo_estatus_tarjeta = request.form['estatus_tarjeta']
+            nuevo_rol = request.form['rol']
+
+            conn.autocommit = False
+            cursor.execute("UPDATE usr.clientes_publico SET id_estatus = ?, id_rol = ? WHERE id_cliente = ?", (nuevo_estatus, nuevo_rol, id_cliente))
+            cursor.execute("UPDATE ba.tarjetas_publico SET id_estatus_tarjeta = ? WHERE id_tarjeta IN (SELECT id_tarjeta FROM ba.identificador_tarjeta WHERE id_cliente = ?)", (nuevo_estatus_tarjeta, id_cliente))
+
+            conn.commit()
+            flash("Datos actualizados correctamente.")
+            return redirect(url_for('admin_usuarios'))
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error al editar: {e}")
+    
+    cursor.execute("SELECT nombre, apellido_paterno, id_estatus, id_rol FROM usr.clientes_publico WHERE id_cliente = ?", (id_cliente,))
+    cliente = cursor.fetchone()
+
+    cursor.execute("""
+        SELECT TOP 1 tp.id_estatus_tarjeta, et.nombre 
+        FROM ba.tarjetas_publico tp
+        JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+        JOIN ba.estatus_tarjeta et ON tp.id_estatus_tarjeta = et.id_estado
+        WHERE it.id_cliente = ?
+    """, (id_cliente,))
+    tarjeta = cursor.fetchone()
+    
+    cursor.execute("SELECT id_estatus, nombre FROM gral.estatus")
+    cat_estatus = cursor.fetchall()
+    cursor.execute("SELECT id_estado, nombre FROM ba.estatus_tarjeta")
+    cat_estatus_tarjeta = cursor.fetchall()
+    cursor.execute("SELECT id_rol, nombre FROM usr.roles")
+    cat_roles = cursor.fetchall()
+
+    conn.close()
+    return render_template('editar_usuario.html', cliente=cliente, tarjeta=tarjeta, cat_estatus=cat_estatus, cat_estatus_tarjeta=cat_estatus_tarjeta, cat_roles=cat_roles, id_cliente=id_cliente)
+
+@app.route('/admin/baja/<int:id_cliente>')
+@login_required
+def admin_baja(id_cliente):
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        conn.autocommit = False
+        cursor.execute("UPDATE usr.clientes_publico SET id_estatus = 3 WHERE id_cliente = ?", (id_cliente,))
+        cursor.execute("UPDATE ba.tarjetas_publico SET id_estatus_tarjeta = 3 WHERE id_tarjeta IN (SELECT id_tarjeta FROM ba.identificador_tarjeta WHERE id_cliente = ?)", (id_cliente,))
+        conn.commit()
+        flash("Usuario dado de baja y tarjetas bloqueadas.")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error al dar de baja: {e}")
+    finally:
+        conn.close()
+    return redirect(url_for('admin_usuarios'))
+
+
+@app.route('/admin/crear', methods=['GET', 'POST'])
+@login_required
+def admin_crear_usuario():
+    # Verificamos que sea admin
+    if current_user.TipoUsuario != 'administrador':
+        flash('Acceso denegado.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        nombre = request.form['nombre']
+        email = request.form['email']
+        password = request.form['password']
+        tipo_usuario = request.form['tipo_usuario']
+        
+        # Encriptamos la contraseña (asegurate de tener generate_password_hash importado)
+        hashed_password = generate_password_hash(password)
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO Usuarios (Nombre, Email, PasswordHash, TipoUsuario) VALUES (?, ?, ?, ?)",
+                (nombre, email, hashed_password, tipo_usuario)
+            )
+            conn.commit()
+            conn.close()
+            flash('Usuario creado exitosamente.', 'success')
+            return redirect(url_for('admin_usuarios'))
+        except Exception as e:
+            flash(f'Error al crear usuario: {e}', 'error')
+
+    # NOTA: En tu imagen, el HTML esta dentro de la carpeta "admin"
+    return render_template('admin/crear_usuario.html')
+
+@app.route('/registro', methods=['GET', 'POST'])
+def registro():
+    if request.method == 'POST':
+        try:
+            # 1. Obtener datos del formulario
+            nombre = request.form['nombre']
+            paterno = request.form['paterno']
+            materno = request.form.get('materno', '') 
+            fecha_nacimiento = request.form['nacimiento']
+            id_pais = int(request.form['id_pais']) 
+            rfc = request.form['rfc']
+            telefono = request.form['telefono']
+            email = request.form['email']
+            password = request.form['password']
+
+            # 2. Encriptar contraseña para login
+            password_hash = generate_password_hash(password)
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # --- INICIO DE TRANSACCIÓN SQL ---
+            
+            # A. Insertar en Clientes Público
+            sql_publico = """
+                SET NOCOUNT ON;
+                INSERT INTO usr.clientes_publico 
+                (id_pais, nombre, apellido_paterno, apellido_materno, fecha_nacimiento)
+                VALUES (?, ?, ?, ?, ?);
+                SELECT SCOPE_IDENTITY();
+            """
+            cursor.execute(sql_publico, (id_pais, nombre, paterno, materno, fecha_nacimiento))
+            id_cliente = int(cursor.fetchval()) 
+
+            # B. Insertar en Clientes Privado
+            sql_privado = """
+                INSERT INTO usr.clientes_privado (id_cliente, telefono, correo_electronico, rfc)
+                VALUES (?, ?, ?, ?)
+            """
+            cursor.execute(sql_privado, (id_cliente, telefono, email, rfc))
+
+            # C. Crear el Usuario (Login)
+            sql_usuario = """
+                INSERT INTO usr.usuarios (id_cliente, contrasena)
+                VALUES (?, ?)
+            """
+            cursor.execute(sql_usuario, (id_cliente, password_hash.encode('utf-8')))
+
+            # ---------------------------------------------------------
+            # D. GENERAR TARJETA, CLABE Y CVV
+            # ---------------------------------------------------------
+            
+            ultimos_4 = str(random.randint(1000, 9999))
+            numero_cuenta = f"100{random.randint(1000000, 9999999)}"
+            clabe = f"012{random.randint(10000000000000, 99999999999999)}"
+            cvv_real = str(random.randint(100, 999)) # Generamos CVV de 3 dígitos
+
+            # Insertar la Tarjeta Pública (Solo guardamos los últimos 4 dígitos visibles)
+            sql_tarjeta = """
+                SET NOCOUNT ON;
+                INSERT INTO ba.tarjetas_publico 
+                (id_banco, id_tipo_tarjeta, id_marca, id_red, id_tipo_cuenta, id_categoria, saldo, ultimos_4, id_estatus_tarjeta)
+                VALUES (1, 1, 1, 1, 1, 1, 0, ?, 2);
+                SELECT SCOPE_IDENTITY();
+            """
+            cursor.execute(sql_tarjeta, (ultimos_4,))
+            id_tarjeta = int(cursor.fetchval())
+
+            # Insertar Identificador Tarjeta
+            sql_identificador = """
+                INSERT INTO ba.identificador_tarjeta (id_tarjeta, id_cliente, numero_cuenta, clabe)
+                VALUES (?, ?, ?, ?)
+            """
+            cursor.execute(sql_identificador, (id_tarjeta, id_cliente, numero_cuenta, clabe))
+            
+            # --- CREAR REGISTRO EN TARJETAS PRIVADAS (ENCRIPTADO) ---
+            # Simulamos el número completo (PAN)
+            pan_falso = f"450000000000{ultimos_4}"
+            
+            # Encriptamos PAN y CVV con Fernet
+            pan_enc = cipher_suite.encrypt(pan_falso.encode('utf-8'))
+            cvv_enc = cipher_suite.encrypt(cvv_real.encode('utf-8'))
+            
+            sql_tarjeta_privada = """
+                INSERT INTO ba.tarjetas_privadas (id_tarjeta, token_pasarela, numero_tarjeta_encriptado, cvv_encriptado, fecha_vencimiento)
+                VALUES (?, 'TOKEN_SIMULADO', ?, ?, '12/30')
+            """
+            cursor.execute(sql_tarjeta_privada, (id_tarjeta, pan_enc, cvv_enc))
+
+            # --- CONFIRMAR CAMBIOS ---
+            conn.commit()
+            conn.close()
+
+            flash('Cuenta creada exitosamente. ¡Inicia sesión!', 'success')
+            return redirect(url_for('login'))
+
+        except Exception as e:
+            if 'conn' in locals():
+                conn.rollback()
+                conn.close()
+            print("Error detallado en registro:", e) 
+            flash(f'Error al registrar: {str(e)}', 'error')
+            return redirect(url_for('registro'))
+
+    return render_template('registro.html')
+
+@app.route('/api/obtener-tarjeta', methods=['GET'])
+@login_required
+def api_obtener_tarjeta():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Solicitamos también el CVV encriptado
+        sql = """
+            SELECT tp.numero_tarjeta_encriptado, tp.fecha_vencimiento, tp.cvv_encriptado
+            FROM ba.tarjetas_privadas tp
+            JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+            WHERE it.id_cliente = ?
+        """
+        cursor.execute(sql, (current_user.id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            enc_numero = row[0]
+            fecha_texto = row[1]
+            enc_cvv = row[2] # <--- Nuevo campo
+            
+            numero_real = "****"
+            cvv_real = "***"
+
+            try:
+                # Desencriptar Tarjeta
+                if enc_numero:
+                    numero_real = cipher_suite.decrypt(enc_numero).decode('utf-8')
+                
+                # Desencriptar CVV
+                if enc_cvv:
+                    cvv_real = cipher_suite.decrypt(enc_cvv).decode('utf-8')
+                else:
+                    cvv_real = "N/A" # Para cuentas viejas sin CVV
+
+            except Exception as e:
+                print(f"Error desencriptando: {e}")
+                numero_real = "Error"
+                cvv_real = "Err"
+
+            return jsonify({
+                'success': True, 
+                'numero': numero_real, 
+                'vencimiento': fecha_texto,
+                'cvv': cvv_real  # <--- Enviamos el CVV al frontend
+            })
+
+        else:
+            return jsonify({'success': False, 'error': 'No se encontró tarjeta'}), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
+@app.route('/historial')
+@login_required
+def ver_movimientos():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Obtener el ID de mi tarjeta
+    cursor.execute("""
+        SELECT id_tarjeta FROM ba.identificador_tarjeta 
+        WHERE id_cliente = ?
+    """, (current_user.id,))
+    data_tarjeta = cursor.fetchone()
+    
+    if not data_tarjeta:
+        flash("No se encontró tarjeta asociada.")
+        return redirect(url_for('user_dashboard'))
+
+    mi_id_tarjeta = data_tarjeta[0]
+
+    # 2. Consultar TODAS las transacciones (Entradas y Salidas)
+    # Usamos tr.transacciones porque es donde guardas los depósitos nuevos
+    cursor.execute("""
+        SELECT 
+            t.id_tipo_transaccion, 
+            t.monto, 
+            t.descripcion_usuario, 
+            t.fecha_transaccion,
+            t.id_tarjeta_origen,
+            t.id_tarjeta_destino
+        FROM tr.transacciones t
+        WHERE t.id_tarjeta_origen = ? OR t.id_tarjeta_destino = ?
+        ORDER BY t.fecha_transaccion DESC
+    """, (mi_id_tarjeta, mi_id_tarjeta))
+    
+    raw_movimientos = cursor.fetchall()
+    conn.close()
+
+    # 3. Formatear los datos para que el HTML los entienda
+    lista_movimientos = []
+    
+    for mov in raw_movimientos:
+        id_tipo = mov[0]
+        monto = float(mov[1])
+        desc = mov[2]
+        fecha = mov[3]
+        origen = mov[4]
+        destino = mov[5]
+
+        # Determinar si es Ingreso (verde) o Gasto (rojo)
+        # Si yo soy el destino, es dinero que entra.
+        es_ingreso = (destino == mi_id_tarjeta)
+
+        # Poner nombre bonito al tipo
+        nombre_tipo = "Movimiento"
+        if id_tipo == 1: nombre_tipo = "Depósito"
+        elif id_tipo == 2: nombre_tipo = "Retiro"
+        elif id_tipo == 3: nombre_tipo = "Transferencia"
+
+        # Crear el objeto diccionario
+        mov_obj = {
+            'tipo': nombre_tipo,
+            'monto': monto,
+            'descripcion': desc,
+            'fecha': fecha.strftime('%d/%m/%Y %H:%M'), # Formato legible
+            'es_ingreso': es_ingreso
+        }
+        lista_movimientos.append(mov_obj)
+
+    return render_template('movimientos.html', movimientos=lista_movimientos)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+    

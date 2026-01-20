@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Operaciones - Banco Seguro</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo"><i class="fas fa-university"></i> Banco Seguro</div>
+        <a href="{{ url_for('user_dashboard') }}" class="btn-back"><i class="fas fa-arrow-left"></i> Volver</a>
+    </nav>
+
+    <div class="container">
+        <h1>Operaciones</h1>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('deposito')">Depositar (Ingresar)</button>
+            <button class="tab-btn" onclick="switchTab('transferencia')">Transferir (Enviar)</button>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="alert">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="op-form-container">
+            <form action="{{ url_for('procesar_operacion') }}" method="POST" id="formOperacion">
+                <input type="hidden" name="tipo_operacion" id="tipoOperacion" value="DEPOSITO">
+
+                <div class="form-group">
+                    <label>Monto ($)</label>
+                    <input type="number" name="monto" step="0.01" min="1" class="form-control" required placeholder="0.00">
+                </div>
+
+                <div id="camposTransferencia" style="display: none;">
+                    <div class="form-group">
+                        <label>Cuenta Destino (10 dígitos)</label>
+                        <input type="text" name="cuenta_destino" class="form-control" placeholder="Ej: 1234567890">
+                    </div>
+                    <div class="form-group">
+                        <label>Concepto / Descripción</label>
+                        <input type="text" name="descripcion" class="form-control" placeholder="Pago de cena">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-submit" id="btnSubmit">Realizar Depósito</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            const tipoInput = document.getElementById('tipoOperacion');
+            const camposTrans = document.getElementById('camposTransferencia');
+            const btn = document.getElementById('btnSubmit');
+            const tabs = document.querySelectorAll('.tab-btn');
+
+            if (tab === 'deposito') {
+                tipoInput.value = 'DEPOSITO';
+                camposTrans.style.display = 'none';
+                btn.textContent = 'Realizar Depósito';
+                btn.style.backgroundColor = '#27ae60'; // Verde
+                tabs[0].classList.add('active');
+                tabs[1].classList.remove('active');
+            } else {
+                tipoInput.value = 'TRANSFERENCIA';
+                camposTrans.style.display = 'block';
+                btn.textContent = 'Enviar Transferencia';
+                btn.style.backgroundColor = '#820ad1'; // Morado
+                tabs[0].classList.remove('active');
+                tabs[1].classList.add('active');
+            }
+        }
+    </script>
+</body>
+</html>
