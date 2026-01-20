@@ -7,36 +7,56 @@ import random
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'tu_clave_super_secreta_aqui'  # Cambia esto en producción
+app.secret_key = 'tu_clave_super_secreta_aqui'
 
 # --- CONFIGURACIÓN DE CRIPTOGRAFÍA ---
-# he generado esta clave válida para ti. 
-# IMPORTANTE: Si reinicias la base de datos, usa siempre la misma clave, 
-# o no podrás desencriptar las tarjetas guardadas anteriormente.
-key = b'2r5U8x/A?D(G+KbPeShVmYq3t6w9z$C&' # Esta era incorrecta en el formato, usaré una generada por librería abajo:
-# CLAVE CORREGIDA Y VÁLIDA:
 key = b'6_bWJ7x8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q=' 
 cipher_suite = Fernet(key)
 
-# --- CONFIGURACIÓN BASE DE DATOS ---
+# --- 1. FUNCIÓN DE CONEXIÓN (CORREGIDA) ---
 def get_db_connection():
-    conn = pyodbc.connect(
+    return pyodbc.connect(
         'DRIVER={ODBC Driver 17 for SQL Server};'
-        r'SERVER=IANDAVID\SQLSERVER;'   # <--- Nombre exacto de tu imagen
-        'DATABASE=banco;'               # <--- Nombre corregido de la BD
+        r'SERVER=IANDAVID\SQLSERVER;'  # <--- Agregue la 'r' al inicio para evitar error de \S
+        'DATABASE=banco;'
         'Trusted_Connection=yes;'
-        'TrustServerCertificate=yes;'   # <--- Importante por la configuración de tu imagen
+        'TrustServerCertificate=yes;'
     )
-    return conn
 
-# --- CONFIGURACIÓN FLASK-LOGIN ---
+# --- 2. AUTO-REPARACIÓN DE ADMIN AL INICIAR ---
+try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Generamos hash compatible con Flask
+    hash_flask = generate_password_hash("Admin123")
+    hash_bytes = hash_flask.encode('utf-8')
+
+    # Actualizamos el admin
+    cursor.execute("""
+        UPDATE usr.usuarios 
+        SET contrasena = ? 
+        FROM usr.usuarios u
+        JOIN usr.clientes_privado cp ON u.id_cliente = cp.id_cliente
+        WHERE cp.correo_electronico = 'admin@bancoseguro.com'
+    """, (hash_bytes,))
+    
+    conn.commit()
+    print("\n[EXITO] ADMIN REPARADO: La contrasena 'Admin123' ya funciona.\n")
+    conn.close()
+except Exception as e:
+    # Quitamos los emojis para que Windows no de error
+    print(f"\n[AVISO] Salto en reparacion (posiblemente ya correcta o error de conexion): {e}\n")
+
+
+# --- 3. CONFIGURACIÓN FLASK-LOGIN ---
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 class User(UserMixin):
     def __init__(self, id_cliente, nombre, rol, estatus):
-        self.id = id_cliente # Flask-Login usa 'id' como identificador
+        self.id = id_cliente 
         self.nombre = nombre
         self.rol = rol # 1=Usuario, 2=Admin
         self.estatus = estatus
@@ -46,24 +66,29 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # Buscamos al usuario por ID para recargar la sesión
-    cursor.execute("""
-        SELECT cp.id_cliente, cp.nombre, cp.id_rol, e.nombre 
-        FROM usr.clientes_publico cp
-        JOIN gral.estatus e ON cp.id_estatus = e.id_estatus
-        WHERE cp.id_cliente = ?
-    """, (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        return User(id_cliente=row[0], nombre=row[1], rol=row[2], estatus=row[3])
-    return None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT cp.id_cliente, cp.nombre, cp.id_rol, e.nombre 
+            FROM usr.clientes_publico cp
+            JOIN gral.estatus e ON cp.id_estatus = e.id_estatus
+            WHERE cp.id_cliente = ?
+        """, (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return User(id_cliente=row[0], nombre=row[1], rol=row[2], estatus=row[3])
+        return None
+    except Exception as e:
+        print("Error en load_user:", e)
+        return None
 
 def limpiar_texto(texto):
     return texto.strip().upper() if texto else ""
+
+# --- AQUÍ DEBAJO SIGUEN TUS RUTAS (@app.route...) ---
 
 # =======================================================
 # RUTAS DE AUTENTICACIÓN
@@ -814,6 +839,33 @@ def ver_movimientos():
         lista_movimientos.append(mov_obj)
 
     return render_template('movimientos.html', movimientos=lista_movimientos)
+
+# --- RUTA DE REPARACIÓN (Solo úsala una vez) ---
+@app.route('/reparar-admin')
+def reparar_admin():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. Creamos un hash compatible con Flask (Python)
+        pass_correcta = generate_password_hash('Admin123') 
+        
+        # 2. Actualizamos la contraseña del usuario admin
+        # Convertimos el string a bytes (.encode) para que entre en el VARBINARY
+        cursor.execute("""
+            UPDATE usr.usuarios 
+            SET contrasena = ? 
+            WHERE id_cliente IN (
+                SELECT id_cliente FROM usr.clientes_privado 
+                WHERE correo_electronico = 'admin@bancoseguro.com'
+            )
+        """, (pass_correcta.encode('utf-8'),))
+        
+        conn.commit()
+        conn.close()
+        return "<h1>¡Éxito!</h1><p>Contraseña del Admin reparada. <a href='/login'>Ve al Login</a> e ingresa con: <b>Admin123</b></p>"
+    except Exception as e:
+        return f"<h1>Error</h1><p>{str(e)}</p>"
 
 if __name__ == '__main__':
     app.run(debug=True)
