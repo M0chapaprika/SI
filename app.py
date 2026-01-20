@@ -180,7 +180,7 @@ def user_dashboard():
             tp.saldo, 
             tp.ultimos_4, 
             tp.id_tarjeta,
-            b.nombre,  -- <--- AQUÍ ESTABA EL ERROR (antes decía nombre_banco)
+            b.nombre, 
             cp.nombre, 
             cp.apellido_paterno
         FROM ba.tarjetas_publico tp
@@ -285,7 +285,6 @@ def procesar_operacion():
     cursor = conn.cursor()
 
     try:
-        # 2. Obtener MI tarjeta (Origen) y mi Saldo
         cursor.execute("""
             SELECT TOP 1 tp.id_tarjeta, tp.saldo 
             FROM ba.tarjetas_publico tp 
@@ -303,15 +302,18 @@ def procesar_operacion():
         # CASO A: DEPÓSITO (Dinero entra)
         # ==========================================
         if tipo_op == 'DEPOSITO':
-            # Sumar saldo a mi tarjeta
+            # 1. Sumar saldo a mi tarjeta
             cursor.execute("UPDATE ba.tarjetas_publico SET saldo = saldo + ? WHERE id_tarjeta = ?", (monto, mi_id_tarjeta))
             
-            # Registrar historial
+            # 2. Registrar en Transacciones (ESTE SÍ FUNCIONA)
             cursor.execute("""
                 INSERT INTO tr.transacciones (id_tipo_transaccion, id_tarjeta_origen, id_tarjeta_destino, monto, fecha_transaccion, descripcion_usuario, id_estatus_transaccion)
                 VALUES (1, ?, ?, ?, GETDATE(), 'Depósito en Ventanilla Virtual', 2)
             """, (mi_id_tarjeta, mi_id_tarjeta, monto))
             
+            # BORRAMOS EL BLOQUE "INSERT INTO ba.movimientos..." PORQUE ESA TABLA ESTÁ ROTA
+
+            conn.commit()
             flash(f"Depósito de ${monto} exitoso.")
 
         # ==========================================
@@ -875,34 +877,34 @@ def admin_movimientos():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # CONSULTA CORREGIDA:
-    # Cambiamos 'cat.tipo_movimiento' por 'ba.tipo_movimiento'
+    # AHORA LEEMOS DE 'tr.transacciones' QUE ES DONDE SE GUARDAN LOS DEPÓSITOS
     sql = """
         SELECT 
-            m.id_movimiento,
-            FORMAT(m.fecha_movimiento, 'dd/MM/yyyy HH:mm') as fecha,
-            cp.nombre + ' ' + cp.apellido_paterno as cliente,
-            tm.nombre as tipo,
-            m.monto,
-            m.concepto,
-            tp.ultimos_4
-        FROM ba.movimientos m
-        JOIN ba.tarjetas_publico tp ON m.id_tarjeta_origen = tp.id_tarjeta
-        JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
-        JOIN usr.clientes_publico cp ON it.id_cliente = cp.id_cliente
-        JOIN ba.tipo_movimiento tm ON m.id_tipo_movimiento = tm.id_tipo_movimiento 
-        ORDER BY m.fecha_movimiento DESC
+            t.id_transaccion,
+            FORMAT(t.fecha_transaccion, 'dd/MM/yyyy HH:mm') as fecha,
+            ISNULL(cp.nombre + ' ' + cp.apellido_paterno, 'Usuario Desconocido') as cliente,
+            CASE 
+                WHEN t.id_tipo_transaccion = 1 THEN 'Depósito' 
+                WHEN t.id_tipo_transaccion = 2 THEN 'Retiro'
+                WHEN t.id_tipo_transaccion = 3 THEN 'Transferencia'
+                ELSE 'Otro' 
+            END as tipo,
+            t.monto,
+            t.descripcion_usuario,
+            ISNULL(tp.ultimos_4, '????')
+        FROM tr.transacciones t
+        LEFT JOIN ba.tarjetas_publico tp ON t.id_tarjeta_origen = tp.id_tarjeta
+        LEFT JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+        LEFT JOIN usr.clientes_publico cp ON it.id_cliente = cp.id_cliente
+        ORDER BY t.fecha_transaccion DESC
     """
-    
-    # NOTA: Si vuelve a fallar diciendo que 'ba.tipo_movimiento' no existe, 
-    # es posible que la tabla se llame diferente (ej: 'gral.tipo_movimiento').
     
     try:
         cursor.execute(sql)
         movimientos = cursor.fetchall()
     except Exception as e:
-        print(f"Error en la consulta SQL: {e}")
-        movimientos = [] # Para que no truene la página si falla la consulta
+        print(f"Error SQL Admin: {e}")
+        movimientos = []
     finally:
         conn.close()
     
