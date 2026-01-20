@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Auditoría de Movimientos - Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { background-color: #f4f7f6; font-family: sans-serif; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 20px; }
+        
+        .table-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #1a1a2e; color: white; }
+        tr:hover { background-color: #f1f1f1; }
+        
+        .monto-positivo { color: green; font-weight: bold; }
+        .monto-negativo { color: #c62828; font-weight: bold; }
+        
+        .btn-volver {
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            background: #1a1a2e;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar" style="background: #1a1a2e; color: white; padding: 15px;">
+        <div class="logo"><i class="fas fa-shield-alt"></i> AUDITORÍA FINANCIERA</div>
+    </nav>
+
+    <div class="container">
+        <a href="{{ url_for('admin_dashboard') }}" class="btn-volver">
+            <i class="fas fa-arrow-left"></i> Volver al Dashboard
+        </a>
+
+        <div class="table-container">
+            <h2><i class="fas fa-list"></i> Historial Global de Movimientos</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Tarjeta</th>
+                        <th>Tipo</th>
+                        <th>Concepto</th>
+                        <th>Monto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mov in movimientos %}
+                    <tr>
+                        <td>#{{ mov[0] }}</td>
+                        <td>{{ mov[1] }}</td>
+                        <td>{{ mov[2] }}</td>
+                        <td>**** {{ mov[6] }}</td>
+                        <td>
+                            <span style="background: #e3f2fd; color: #1565c0; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">
+                                {{ mov[3] }}
+                            </span>
+                        </td>
+                        <td>{{ mov[5] }}</td>
+                        <td class="{{ 'monto-positivo' if mov[3] == 'Deposito' else 'monto-negativo' }}">
+                            ${{ "{:,.2f}".format(mov[4]) }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 20px;">
+                            No hay movimientos registrados en el sistema.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</body>
+</html>

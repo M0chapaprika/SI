@@ -866,6 +866,47 @@ def reparar_admin():
         return "<h1>¡Éxito!</h1><p>Contraseña del Admin reparada. <a href='/login'>Ve al Login</a> e ingresa con: <b>Admin123</b></p>"
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>"
+    
+@app.route('/admin/movimientos')
+@login_required
+def admin_movimientos():
+    if not current_user.es_admin(): return redirect(url_for('user_dashboard'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # CONSULTA CORREGIDA:
+    # Cambiamos 'cat.tipo_movimiento' por 'ba.tipo_movimiento'
+    sql = """
+        SELECT 
+            m.id_movimiento,
+            FORMAT(m.fecha_movimiento, 'dd/MM/yyyy HH:mm') as fecha,
+            cp.nombre + ' ' + cp.apellido_paterno as cliente,
+            tm.nombre as tipo,
+            m.monto,
+            m.concepto,
+            tp.ultimos_4
+        FROM ba.movimientos m
+        JOIN ba.tarjetas_publico tp ON m.id_tarjeta_origen = tp.id_tarjeta
+        JOIN ba.identificador_tarjeta it ON tp.id_tarjeta = it.id_tarjeta
+        JOIN usr.clientes_publico cp ON it.id_cliente = cp.id_cliente
+        JOIN ba.tipo_movimiento tm ON m.id_tipo_movimiento = tm.id_tipo_movimiento 
+        ORDER BY m.fecha_movimiento DESC
+    """
+    
+    # NOTA: Si vuelve a fallar diciendo que 'ba.tipo_movimiento' no existe, 
+    # es posible que la tabla se llame diferente (ej: 'gral.tipo_movimiento').
+    
+    try:
+        cursor.execute(sql)
+        movimientos = cursor.fetchall()
+    except Exception as e:
+        print(f"Error en la consulta SQL: {e}")
+        movimientos = [] # Para que no truene la página si falla la consulta
+    finally:
+        conn.close()
+    
+    return render_template('admin_movimientos.html', movimientos=movimientos)
 
 if __name__ == '__main__':
     app.run(debug=True)
